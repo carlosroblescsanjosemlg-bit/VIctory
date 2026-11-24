@@ -1,0 +1,105 @@
+name: CI
+
+# Builds, lints and tests every push to main and every pull request.
+# Needs no game data, no secrets and no GPU (docs/asset-policy.md).
+# Formatting is checked separately (see the open "CI: check the formatting"
+# pull request), so it is left out here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  policy:
+    name: Asset policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      # Installs the toolchain rust-toolchain.toml names, with its components
+      # and targets, so CI uses the same compiler as local builds.
+      - name: Install the toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Check the asset policy
+        run: cargo xtask policy
+
+  windows-lint:
+    # Clippy type-checks the whole workspace for the Windows target from Linux;
+    # nothing is linked, so no Windows SDK is needed. blake3's build script
+    # compiles C for the target and asks for an MSVC-style compiler, which
+    # clang provides in its cl mode.
+    name: Clippy (x86_64-pc-windows-msvc)
+    runs-on: ubuntu-latest
+    env:
+      CC_x86_64_pc_windows_msvc: clang-cl
+      AR_x86_64_pc_windows_msvc: llvm-lib
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Install clang and llvm-lib
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang llvm
+          mkdir -p "$HOME/.local/bin"
+          ln -sf "$(command -v clang)" "$HOME/.local/bin/clang-cl"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Install the toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: windows-msvc
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc --locked -- -D warnings
+      - name: Clippy with diagnostics
+        run: cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc --locked --features victory/diagnostics -- -D warnings
+
+  portable-tests:
+    # The crates that build on any host. The GPU, HLE and loader crates and
+    # the front end are Windows-only today.
+    name: Tests (Linux, portable crates)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Install the toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Test
+        run: >-
+          cargo test --locked
+          -p victory-core -p victory-formats -p victory-game
+          -p victory-pipeline -p victory-shader -p xtask
+
+  windows-tests:
+    name: Tests (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Install the toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: |
+            .
+            tests/fixtures/hle-probe
+      - name: Test
+        run: cargo test --workspace --locked --no-fail-fast
