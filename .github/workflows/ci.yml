@@ -101,5 +101,12 @@ jobs:
           workspaces: |
             .
             tests/fixtures/hle-probe
+      # The runner has no GPU; the GPU tests run on the software adapter.
+      # Skipped until the open fix for its fixture lands (pull request
+      # "test(gpu): use the SDK root parameter in the serializer fixture"):
+      # the hand-written root parameter puts the union 4 bytes early on x64,
+      # so the host serializer returns E_INVALIDARG. Remove the skip then.
       - name: Test
-        run: cargo test --workspace --locked --no-fail-fast
+        run: >-
+          cargo test --workspace --locked --no-fail-fast --
+          --skip root::tests::host_serialized_blobs_create_root_signatures
