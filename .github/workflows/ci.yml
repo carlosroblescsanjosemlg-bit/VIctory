@@ -7,7 +7,7 @@ name: CI
 
 on:
   push:
-    branches: [main, "claude/**"] # TEMPORARY: fork testing, revert before a PR
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
